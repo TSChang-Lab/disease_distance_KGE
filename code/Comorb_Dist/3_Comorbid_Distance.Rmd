@@ -1,0 +1,41 @@
+---
+title: "Comorbidity-based Disease Distance Metric"
+author: "Joy_Fu"
+date: '2022-07-22'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Basic setups
+```{r Setups, message=FALSE, warning=FALSE, paged.print=FALSE}
+rm(list = ls())
+pacman::p_load(tidyverse)
+
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/outputs/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/code/funcs_used.R")
+```
+
+# Calculate comorbidity between disease pairs (EHR data on server)
+File path: /opt/genomics/IPHinvestigators/joyfu/disease_similarity/code/comorbidity/code/
+* 3.1_hz_prepare.R (Clean visit.tsv data, prepare dataset for Cox model analyses)
+* 3.2_full_tb_hz_prepare.R (Each diagnosis code as a separate file, record time)
+* 3.3_file_join.R (Join all diagnosis files together)
+* 3.4_run_hz_sep.R (Get comorbid data, also as a filtering step for HR calculation)
+
+File path: /opt/genomics/IPHinvestigators/joyfu/disease_similarity/code/comorbidity/code/run_sep/
+* Separate_DF.ipynb (separate running files to reduce memory)
+* xx_run_hz_sep.R (Run HZ model separately)
+
+File path: /opt/genomics/IPHinvestigators/joyfu/disease_similarity/code/comorbidity/data/new/output/
+* Combine_results.ipynb (Combine separate results)
+
+Output file: 
+* Comorbidity in UCLA EHR: /Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/Comorb_Dist/comorb_df_long.rda
+
+
+

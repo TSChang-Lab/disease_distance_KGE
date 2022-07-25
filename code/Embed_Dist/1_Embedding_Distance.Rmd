@@ -1,0 +1,153 @@
+---
+title: "Embedding-based Disease Distance Metric"
+author: "Joy_Fu"
+date: '2022-07-21'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Basic setups
+```{r Setups, message=FALSE, warning=FALSE, paged.print=FALSE}
+rm(list = ls())
+pacman::p_load(tidyverse, readr, WGCNA, cluster, fossil)
+
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/outputs/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/code/funcs_used.R")
+```
+
+# Part 1. Calculate embedding similarity
+This will take a long time, already generated the final outputs in the data folder.
+```{r}
+source("/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/code/Embed_Dist/1.1_RV_embedding_similarity.R")
+# Output file: /Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/Embed_Dist/mod/embed_sim.rda
+```
+
+# Part 2. Data Cleaning
+```{r}
+load(file = paste0(raw_data_path, 'Embed_Dist/mod/embed_sim.rda'))
+dim(embed_sim)
+# We first want to calibrate the RV coefficients to [0,1]
+embed_sim_cal = range01(embed_sim)
+# Get long format (pairwise distance)
+embed_sim_full = makeSymm(embed_sim_cal)
+embed_long = reshape2::melt(embed_sim_full)
+colnames(embed_long) = c("ICD1", "ICD2", "embed_sim")
+embed_long_df = embed_long %>% as.data.frame() %>% 
+  mutate(embed_dist = 1 - embed_sim)
+save(embed_long_df, file = paste0(raw_data_path, 'Embed_Dist/mod/embed_long_df.rda'))
+```
+
+# Part 3. Clustering
+## 1. Hierarchical static cut tree
+```{r}
+embed.dist = as.dist(1 - embed_sim_cal)
+consTree = hclust(embed.dist, method = "complete")
+# Hierarchical tree only
+hclusters = cutree(consTree, k = 22)
+table(hclusters)
+```
+
+## 2. K-medoids
+```{r}
+embed.kmedoids = pam(embed.dist, 22) # create k-medoids clustering with 22 clusters
+kclusters = embed.kmedoids$cluster
+table(kclusters)
+```
+
+## 3. Hierarchical dynamic cut trees
+```{r}
+# WGCNA w/ Dynamic Tree Cut
+# Set min module size -- here we set the number to which can result in 22 clusters
+minModuleSize = 41
+unmergedLabels = cutreeDynamic(dendro = consTree, cutHeight = NULL,
+                               distM = 1 - embed_sim_full,
+                               minClusterSize = minModuleSize)
+unmergedColors = labels2colors(unmergedLabels)
+table(unmergedLabels)
+```
+
+## 4. Evaluation of clustering results
+### 1) Record clustering results
+```{r Record the cluster results}
+cluster_result = cbind(colnames(embed_sim_cal), hclusters, kclusters, unmergedLabels, unmergedColors)
+colnames(cluster_result) = c("ICD", "hcluster_embed", "kcluster_embed", "dtcluster_embed", "dtcolor_embed")
+cluster_result_addChap = cluster_result %>% as.data.frame() %>% 
+  mutate(chap_clinic = case_when(
+    substr(ICD, 1, 1) == "A" | substr(ICD, 1, 1) == "B" ~ "I",
+    substr(ICD, 1, 1) == "C" | substr(ICD, 1, 2) %in% c(paste0("D", 0:4)) ~ "II",
+    substr(ICD, 1, 2) %in% c(paste0("D", 5:9)) ~ "III", 
+    substr(ICD, 1, 1) == "E" ~ "IV",
+    substr(ICD, 1, 1) == "F" ~ "V",
+    substr(ICD, 1, 1) == "G" ~ "VI",
+    substr(ICD, 1, 2) %in% c(paste0("H", 0:5)) ~ "VII",
+    substr(ICD, 1, 2) %in% c(paste0("H", 6:9)) ~ "VIII",
+    substr(ICD, 1, 1) == "I" ~ "IX",
+    substr(ICD, 1, 1) == "J" ~ "X",
+    substr(ICD, 1, 1) == "K" ~ "XI",
+    substr(ICD, 1, 1) == "L" ~ "XII",
+    substr(ICD, 1, 1) == "M" ~ "XIII",
+    substr(ICD, 1, 1) == "N" ~ "XIV",
+    substr(ICD, 1, 1) == "O" ~ "XV",
+    substr(ICD, 1, 1) == "P" ~ "XVI",
+    substr(ICD, 1, 1) == "Q" ~ "XVII",
+    substr(ICD, 1, 1) == "R" ~ "XVIII",
+    substr(ICD, 1, 1) == "S" | substr(ICD, 1, 1) == "T" ~ "XIX",
+    substr(ICD, 1, 1) %in% c("V", "W", "X", "Y") ~ "XX",
+    substr(ICD, 1, 1) == "Z" ~ "XXI",
+    substr(ICD, 1, 1) == "U" ~ "XXII"
+  )) %>% 
+  mutate(chapter_num = as.numeric(as.roman(chap_clinic))) %>% 
+  mutate_at(c("hcluster_embed", "kcluster_embed", "dtcluster_embed"), as.numeric)
+
+# Output results to table
+write.table(cluster_result, file = paste0(output_path, "ICD_embed_cluster_results.txt"), 
+            sep = "\t", quote = F, row.names = F, col.names = T)
+# save(cluster_result, file = paste0(raw_data_path, "Embed_Dist/mod/cluster_result.rda"))
+```
+
+### 2) Rand index
+```{r Rand index calculation}
+# Calculate rand index
+rand_hcluster_e = rand.index(cluster_result_addChap$hcluster_embed, cluster_result_addChap$chapter_num)
+rand_kmed_e = rand.index(cluster_result_addChap$kcluster_embed, cluster_result_addChap$chapter_num)
+rand_dtc_e = rand.index(cluster_result_addChap$dtcluster_embed, cluster_result_addChap$chapter_num)
+
+results_cluster = c(rand_hcluster_e, rand_kmed_e, rand_dtc_e)
+results_cluster
+```
+
+# Appendix -- Get joint_CONCEPT.rda (just need to run once)
+```{r joint.CONCEPT.rda}
+# Read in raw mapping data downloaded from Athena
+CONCEPT = read_delim(paste0(raw_data_path, "Raw/Embedding/athena.download.1209/CONCEPT.csv"), delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+CONCEPT_RELATIONSHIP = read_delim(paste0(raw_data_path, "Raw/Embedding/athena.download.1209/CONCEPT_RELATIONSHIP.csv"), delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+
+CONCEPT_ICD = CONCEPT %>% 
+  filter(vocabulary_id == "ICD10CM" | vocabulary_id == "ICD10") %>% 
+  filter(domain_id == "Condition") %>% 
+  select(concept_id, concept_name, concept_code) %>% unique()
+CONCEPT_SNOMED = CONCEPT %>% 
+  filter(vocabulary_id == "SNOMED" & domain_id == "Condition") %>% 
+  select(concept_id, concept_code)
+CONCEPT_RELATIONSHIP_short = CONCEPT_RELATIONSHIP %>% 
+  filter(relationship_id == "Maps to") %>% 
+  filter(concept_id_1 != concept_id_2) %>% 
+  select(concept_id_1, concept_id_2)
+# Join together
+CONCEPT_RELATIONSHIP_full = CONCEPT_RELATIONSHIP_short %>% 
+  left_join(CONCEPT_SNOMED, by = c("concept_id_2" = "concept_id")) %>% 
+  left_join(CONCEPT_ICD, by = c("concept_id_1" = "concept_id")) %>% 
+  rename(ICD_10 = concept_code.y,
+         SNOMED_id = concept_code.x) %>% drop_na() %>% select(-c(concept_id_1, concept_id_2))
+joint_CONCEPT = CONCEPT_RELATIONSHIP_full %>% select(-concept_name) %>% 
+  unique() %>% arrange(ICD_10)
+
+save(joint_CONCEPT, file = paste0(raw_data_path, 'Embedding.Sim/mod/joint_CONCEPT.rda'))
+```
+
+

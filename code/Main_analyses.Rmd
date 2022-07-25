@@ -1,0 +1,233 @@
+---
+title: "Main_analyses"
+author: "Joy_Fu"
+date: '2022-07-22'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Basic setups
+```{r Setups, message=FALSE, warning=FALSE, paged.print=FALSE}
+rm(list = ls())
+pacman::p_load(tidyverse, e1071, gtools)
+
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/outputs/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/code/funcs_used.R")
+```
+
+# Part 1. Clean distance metrics together
+## 1. Join three metrics together and add clinical chapters
+```{r}
+load(file = paste0(raw_data_path, 'Embed_Dist/mod/embed_long_df.rda'))
+load(file = paste0(raw_data_path, 'Genetic_Dist/mod/gen_corr_full.rda'))
+load(file = paste0(raw_data_path, 'Comorb_Dist/comorb_df_long.rda'))
+
+joint_distance_full = embed_long_df %>% 
+  full_join(gen_corr_full) %>% full_join(comorb_df_long) %>% 
+  dplyr::rename(jaccard_dist = comorb_dist) %>% 
+  mutate(gen_dist = (-1)*gen_cor) %>% 
+  # Add clinical chapters
+  mutate(chap_clinic1 = case_when(
+    substr(ICD1, 1, 1) == "A" | substr(ICD1, 1, 1) == "B" ~ "I",
+    substr(ICD1, 1, 1) == "C" | substr(ICD1, 1, 2) %in% c(paste0("D", 0:4)) ~ "II",
+    substr(ICD1, 1, 2) %in% c(paste0("D", 5:9)) ~ "III", 
+    substr(ICD1, 1, 1) == "E" ~ "IV",
+    substr(ICD1, 1, 1) == "F" ~ "V",
+    substr(ICD1, 1, 1) == "G" ~ "VI",
+    substr(ICD1, 1, 2) %in% c(paste0("H", 0:5)) ~ "VII",
+    substr(ICD1, 1, 2) %in% c(paste0("H", 6:9)) ~ "VIII",
+    substr(ICD1, 1, 1) == "I" ~ "IX",
+    substr(ICD1, 1, 1) == "J" ~ "X",
+    substr(ICD1, 1, 1) == "K" ~ "XI",
+    substr(ICD1, 1, 1) == "L" ~ "XII",
+    substr(ICD1, 1, 1) == "M" ~ "XIII",
+    substr(ICD1, 1, 1) == "N" ~ "XIV",
+    substr(ICD1, 1, 1) == "O" ~ "XV",
+    substr(ICD1, 1, 1) == "P" ~ "XVI",
+    substr(ICD1, 1, 1) == "Q" ~ "XVII",
+    substr(ICD1, 1, 1) == "R" ~ "XVIII",
+    substr(ICD1, 1, 1) == "S" | substr(ICD1, 1, 1) == "T" ~ "XIX",
+    substr(ICD1, 1, 1) %in% c("V", "W", "X", "Y") ~ "XX",
+    substr(ICD1, 1, 1) == "Z" ~ "XXI",
+    substr(ICD1, 1, 1) == "U" ~ "XXII"
+  )) %>% 
+  mutate(chap_clinic2 = case_when(
+    substr(ICD2, 1, 1) == "A" | substr(ICD2, 1, 1) == "B" ~ "I",
+    substr(ICD2, 1, 1) == "C" | substr(ICD2, 1, 2) %in% c(paste0("D", 0:4)) ~ "II",
+    substr(ICD2, 1, 2) %in% c(paste0("D", 5:9)) ~ "III", 
+    substr(ICD2, 1, 1) == "E" ~ "IV",
+    substr(ICD2, 1, 1) == "F" ~ "V",
+    substr(ICD2, 1, 1) == "G" ~ "VI",
+    substr(ICD2, 1, 2) %in% c(paste0("H", 0:5)) ~ "VII",
+    substr(ICD2, 1, 2) %in% c(paste0("H", 6:9)) ~ "VIII",
+    substr(ICD2, 1, 1) == "I" ~ "IX",
+    substr(ICD2, 1, 1) == "J" ~ "X",
+    substr(ICD2, 1, 1) == "K" ~ "XI",
+    substr(ICD2, 1, 1) == "L" ~ "XII",
+    substr(ICD2, 1, 1) == "M" ~ "XIII",
+    substr(ICD2, 1, 1) == "N" ~ "XIV",
+    substr(ICD2, 1, 1) == "O" ~ "XV",
+    substr(ICD2, 1, 1) == "P" ~ "XVI",
+    substr(ICD2, 1, 1) == "Q" ~ "XVII",
+    substr(ICD2, 1, 1) == "R" ~ "XVIII",
+    substr(ICD2, 1, 1) == "S" | substr(ICD2, 1, 1) == "T" ~ "XIX",
+    substr(ICD2, 1, 1) %in% c("V", "W", "X", "Y") ~ "XX",
+    substr(ICD2, 1, 1) == "Z" ~ "XXI",
+    substr(ICD2, 1, 1) == "U" ~ "XXII"
+  ))
+```
+
+## 2. Add naive tree distance metric
+```{r}
+joint_distance_full_naive = joint_distance_full %>% 
+  mutate(naive_dist = case_when(
+    chap_clinic1 == chap_clinic2 ~ abs(as.numeric(substr(ICD1, 2, 3)) - as.numeric(substr(ICD2, 2, 3)))*0.01,
+    TRUE ~ 1
+  )) %>% unique() %>% 
+  select(ICD1, chap_clinic1, ICD2, chap_clinic2, naive_dist, embed_dist, embed_sim, jaccard_dist, N1, N2, N_pairs, 
+         gen_dist, gen_cor, gen_cor_sd, Study_type, h2_D1, h2_D2, d1_confidence, d2_confidence)
+# dim = 3960163, 19
+
+keep_column = c("ICD1", "ICD2", "chap_clinic1", "chap_clinic2", 
+                "embed_dist", "naive_dist", "jaccard_dist", "gen_dist", "Study_type")
+dist_final_full = joint_distance_full_naive %>% as.data.frame() %>% select(all_of(keep_column))
+# dim = 3960163, 9
+save(dist_final_full, file = paste0(raw_data_path, "dist_final_full.rda"))
+```
+
+## 3. Remove duplicates (A00-A01 and A01-A00)
+```{r}
+# Make unique pairs
+dist_final_nodup = dist_final_full %>% rowwise() %>% 
+  mutate(id = paste(sort(c(ICD1, ICD2)), collapse = "-")) %>% ungroup() %>% as.data.frame() %>% 
+  filter(ICD1 != ICD2) %>% filter(substr(ICD1, 3, 3) %!in% LETTERS & substr(ICD2, 3, 3) %!in% LETTERS) %>% 
+  select(id, embed_dist, naive_dist, jaccard_dist, gen_dist, Study_type) %>% unique() %>% 
+  separate(id, c("ICD1", "ICD2"), "-")
+# dim = 1963566, 7
+save(dist_final_nodup, file = paste0(raw_data_path, "dist_final_nodup.rda"))
+```
+
+## 4. Output to txt files
+```{r}
+write.table(joint_distance_full_naive, file = paste0(output_path, "ICD_Distance_full.txt"), 
+            sep = "\t", quote = F, row.names = F, col.names = T)
+write.table(dist_final_nodup, file = paste0(output_path, "ICD_Distance_short.txt"), 
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+# Part 2. Check distribution - Summary statistics
+## 1. Except genetic (since genetic data we have replicates due to study type issue)
+```{r}
+dist_final_short = dist_final_nodup %>% select(-c(gen_dist, Study_type)) %>% unique()
+# N = 1,963,503
+# Make a summary table  
+n_sum = t(dist_final_short %>% summarise_if(is.numeric, function(x) sum(!is.na(x))))
+min_sum = t(dist_final_short %>% summarise_if(is.numeric, min, na.rm = T))
+max_sum = t(dist_final_short %>% summarise_if(is.numeric, max, na.rm = T))
+range_sum = paste0("[", round(min_sum, 2), " - ", round(max_sum, 2), "]")
+mean_sum = t(dist_final_short %>% summarise_if(is.numeric, mean, na.rm = T))
+sd_sum = t(dist_final_short %>% summarise_if(is.numeric, sd, na.rm = T))
+mean_sd_sum = paste0(round(mean_sum, 2), " (", round(sd_sum, 2), ")")
+median_sum = t(dist_final_short %>% summarise_if(is.numeric, median, na.rm = T))
+q1_sum = t(dist_final_short %>% summarise_if(is.numeric, function(x) quantile(x, 0.25, na.rm = T)))
+q3_sum = t(dist_final_short %>% summarise_if(is.numeric, function(x) quantile(x, 0.75, na.rm = T)))
+median_q_sum = paste0(round(median_sum, 2), " [", round(q1_sum, 2), ",", round(q3_sum, 2), "]")
+summary_df = as.data.frame(cbind(n_sum, range_sum, mean_sd_sum, median_q_sum))
+names(summary_df) = c("N", "Range", "Mean (SD)", "Median [1Q, 3Q]")
+
+embed_skew = dist_final_short %>% select(embed_dist) %>% drop_na()
+skewness(embed_skew$embed_dist)
+gen_skew = dist_final %>% select(gen_dist) %>% drop_na() 
+skewness(gen_skew$gen_dist)
+```
+
+# Back to genetic only
+```{r}
+dist_gene_short = dist_final_nodup %>% select(ICD1, ICD2, gen_cor, Study_type) %>% drop_na()
+```
+
+# Part 3. Association check - embeddings vs. others
+```{r}
+compare_distance_df = joint_distance_full_naive %>% 
+  select(ICD1, chap_clinic1, ICD2, chap_clinic2, naive_dist, embed_dist, jaccard_dist, gen_dist, Study_type)
+compare_distance_df$chap_clinic1 = factor(compare_distance_df$chap_clinic1,
+                                      levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+                                                 "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+                                                 "XXI", "XXII"))
+compare_distance_df$chap_clinic2 = factor(compare_distance_df$chap_clinic2,
+                                      levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+                                                 "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+                                                 "XXI", "XXII"))
+# save(compare_distance_df, file = paste0(raw_data_path, "compare_distance_df.rda"))
+```
+
+```{r}
+n_count = compare_distance_df %>% 
+  group_by(chap_clinic1) %>% 
+  dplyr::summarise(
+    n_embed = sum(!is.na(embed_dist)), 
+    x_genetic = sum(!is.na(embed_dist) & !is.na(gen_dist)),
+    x_comorb = sum(!is.na(embed_dist) & !is.na(jaccard_dist)))
+
+cor_Spearman = compare_distance_df %>% 
+  group_by(chap_clinic1) %>% 
+  dplyr::summarise(
+    cor_gene = cor(embed_dist, gen_dist, use = "na.or.complete", method = "spearman"),
+    cor_comorb = cor(embed_dist, jaccard_dist, use = "na.or.complete", method = "spearman"),
+    cor_comorb_pearson = cor(embed_dist, jaccard_dist, use = "na.or.complete", method = "pearson"))
+
+# Also calculate p-values
+cor_vec_gene = c()
+cor_vec_comorb = c()
+
+for(i in 1:22) {
+  print(i)
+  chap = as.character(as.roman(i))
+  cor_P_pval = compare_distance_df %>% filter(chap_clinic1 == chap & !is.na(embed_dist))
+  
+  cor_gene = group_cor2(cor_P_pval, "embed_dist", "gen_dist")
+  cor_vec_gene = c(cor_vec_gene, cor_gene)
+  cor_comorb = group_cor2(cor_P_pval, "embed_dist", "jaccard_dist")
+  cor_vec_comorb = c(cor_vec_comorb, cor_comorb)
+  
+}
+
+cor_Spearman_P = as.data.frame(cbind(cor_vec_gene, cor_vec_comorb))
+
+cor_Embedresult_byChap = cbind(n_count, cor_Spearman[,2:3], cor_Spearman_P)
+colnames(cor_Embedresult_byChap) = c("Chapter", "n_embed", "complete_genetic", "complete_comorb", 
+                                "cor_gene", "cor_comorb", "cor_gene_p", "cor_comorb_p")
+```
+
+# Part 4. Embedding vs. Genetic
+```{r}
+# Add ICD desc 
+library(icd.data)
+icd10cm2016_short = icd10cm2016 %>% filter(nchar(code) == 3) %>% 
+  select(code, short_desc) %>% unique()
+embed_gen_addDesc = dist_final_nodup %>% filter(!is.na(gen_dist) & !is.na(embed_dist)) %>% 
+  left_join(icd10cm2016_short, by = c("ICD1" = "code")) %>% rename(ICD1_desc = short_desc) %>% 
+  left_join(icd10cm2016_short, by = c("ICD2" = "code")) %>% rename(ICD2_desc = short_desc)
+embed_gen_final = embed_gen_addDesc %>% 
+  filter(substr(tolower(ICD1_desc), 1, 5) %!in% c("other", "unspe") &
+         substr(tolower(ICD2_desc), 1, 5) %!in% c("other", "unspe")) %>% 
+  select(ICD1, ICD1_desc, ICD2, ICD2_desc, embed_dist, gen_dist, Study_type) 
+# Fit linear regression
+embed_gen_lm = lm(embed_dist ~ gen_dist + Study_type, data = embed_gen_final)
+summary(embed_gen_lm)
+```
+
+```{r}
+# get quintile
+levels(quantcut(embed_gen_final$gen_dist, q = 4, na.rm = T))
+levels(quantcut(embed_gen_final$embed_dist, q = 4, na.rm = T))
+
+embed_gene_tocheck = embed_gen_final %>% 
+  filter(gen_dist <= -0.374 & embed_dist > 0.85) 
+```

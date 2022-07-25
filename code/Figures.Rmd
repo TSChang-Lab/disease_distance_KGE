@@ -1,0 +1,833 @@
+---
+title: "Figures"
+author: "Joy_Fu"
+date: "5/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Basic setups
+```{r}
+rm(list = ls())
+pacman::p_load(tidyverse, ggridges, plyr, ggbreak, gridExtra, gtable, grid, corrplot, ComplexHeatmap, ggformula, circlize, ggpubr)
+
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/outputs/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Disease.Similarity/GitHub/code/funcs_used.R")
+
+load(file = paste0(raw_data_path, "dist_final_nodup.rda"))
+```
+
+# Figure 2. Density plots for four distance metrics
+```{r}
+dist_short_long = dist_final_nodup %>% 
+  select(-c(ICD1, ICD2, Study_type)) %>% 
+  gather(key = "Metrics", value = "Value", na.rm = T)
+# Get mean values for each metric
+mu = ddply(dist_short_long, "Metrics", summarise, grp.mean = mean(Value))
+# Plot each
+dist_embed = dist_short_long %>% filter(Metrics == "embed_dist")
+plot_embed = ggplot(dist_embed, aes(x = Value)) + 
+  geom_histogram(bins = 50, fill = "#f28482") +
+  geom_vline(xintercept = mu$grp.mean[1], linetype = "dashed") + 
+  ggtitle("Embedding Distance") + 
+  labs(y = "Count", x = "Value")
+
+dist_gene = dist_short_long %>% filter(Metrics == "gen_dist")
+plot_gene = ggplot(dist_gene, aes(x = Value)) + 
+  geom_histogram(bins = 50, fill = "#84a59d") +
+  geom_vline(xintercept = mu$grp.mean[2], linetype = "dashed") +
+  ggtitle("Genetic Distance") + 
+  labs(y = "Count", x = "Value")
+
+dist_jaccard = dist_short_long %>% filter(Metrics == "jaccard_dist")
+options( scipen = 999 )
+plot_jaccard = ggplot(dist_jaccard, aes(x = Value)) + 
+  geom_histogram(bins = 50, fill = "#a3c4f3") +
+  geom_vline(xintercept = mu$grp.mean[3], linetype = "dashed") + xlim(0, 1) + 
+  scale_y_break(c(30000, 90000), scales = 0.5, ticklabels = c(90000, 95000, 100000)) + 
+  scale_y_break(c(100000, 110000), scales = 0.5, ticklabels = c(200000, 600000, 1000000)) +
+  ggtitle("Comorbidity Distance") + 
+  labs(y = "Count", x = "Value")
+
+dist_naive = dist_short_long %>% filter(Metrics == "naive_dist")
+plot_naive = ggplot(dist_naive, aes(x = Value)) + 
+  geom_histogram(bins = 50, fill = "#f6bd60") +
+  geom_vline(xintercept = mu$grp.mean[4], linetype = "dashed") +
+  scale_y_break(c(5000, 1000000), scales = 0.5) +
+  ggtitle("ICD Tree-based Distance") + 
+  labs(y = "Count", x = "Value")
+
+# Output to pdf
+g1 = ggplotGrob(print(plot_naive))
+g2 = ggplotGrob(plot_embed)
+g3 = ggplotGrob(print(plot_jaccard))
+g4 = ggplotGrob(plot_gene)
+g_set1 = rbind(g1, g3, size = "first")
+g_set1$widths = unit.pmax(g1$widths, g3$widths)
+g_set2 = rbind(g2, g4, size = "first")
+g_set2$widths = unit.pmax(g2$widths, g4$widths)
+
+pdf(file = paste0(output_path, "Dist.Eval/Density_naive_jaccard.pdf"), wi = 4, he = 8);
+grid.draw(g_set1)
+dev.off()
+
+pdf(file = paste0(output_path, "Dist.Eval/Density_embed_gene.pdf"), wi = 4, he = 8);
+grid.draw(g_set2)
+dev.off()
+```
+
+## Add: genetic by study type
+```{r}
+dist_gene_short = dist_final_nodup %>% select(ICD1, ICD2, gen_dist, Study_type) %>% drop_na()
+mu_gene = dist_gene_short %>% group_by(Study_type) %>% 
+  dplyr::summarise(mean_cor = mean(gen_dist, na.rm = T)) %>% pull(mean_cor)
+plot_gene_study = ggplot(dist_gene_short, aes(x = gen_dist, fill = Study_type)) + 
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  geom_vline(xintercept = mu_gene[1], linetype = "dashed") +
+  geom_vline(xintercept = mu_gene[2], linetype = "dashed") +
+  ggtitle("Genetic Correlation") + 
+  labs(y = "Count", x = "Value")
+```
+
+
+# Figure 3. Embedding heatmaps
+```{r Load in embedding raw data}
+load(file = paste0(raw_data_path, "Embedding.Sim/final/embed_sim_cal.rda"))
+load(file = paste0(raw_data_path, "Embedding.Sim/final/embed_long_df.rda"))
+load(file = paste0(raw_data_path, "Embedding.Sim/final/embed_long_df_addChap.rda"))
+```
+
+## 1) ICD-3 digit -- F3 group
+```{r Within group check}
+# Here we take F3 as an example
+group_icd = grep("F3+", colnames(embed_sim_cal), value = TRUE)
+group_F3_embed = embed_long_df %>% filter(ICD1 %in% group_icd & ICD2 %in% group_icd)
+# Distribution
+summary(group_F3_embed$embed_dist)
+sd(group_F3_embed$embed_dist)
+to_plot_mean = group_F3_embed %>% select(ICD1, ICD2, embed_dist) %>% 
+  spread(ICD2, value = embed_dist) %>% column_to_rownames("ICD1") %>% as.matrix()
+to_plot_mean[1,1] = NA
+to_plot_mean[2,2] = NA
+to_plot_mean[3,3] = NA
+to_plot_mean[4,4] = NA
+to_plot_mean[5,5] = NA
+to_plot_mean[5,6] = NA
+to_plot_mean[5,7] = NA
+to_plot_mean[6,5] = NA
+to_plot_mean[6,6] = NA
+to_plot_mean[6,7] = NA
+to_plot_mean[7,5] = NA
+to_plot_mean[7,6] = NA
+to_plot_mean[7,7] = NA
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/F3_ICD.pdf'), wi = 5, he = 6);
+corrplot(to_plot_mean, is.corr = FALSE, method = 'color', col.lim = c(0.33, 1), type = "lower", 
+         tl.pos = "ld", tl.col = 'grey30', tl.srt = 0,
+         col = COL1('Blues'), cl.pos = 'r', addCoef.col = 'grey30')
+dev.off()
+```
+
+## 2) Group (Sub-chapter) -- F group
+```{r Within sub-chapter check}
+# F chapter as an example
+group_icd = grep("F+", colnames(embed_sim_cal), value = TRUE)
+group_F_embed = embed_long_df %>% filter(ICD1 %in% group_icd & ICD2 %in% group_icd)
+# Distribution
+summary(group_F_embed$embed_dist)
+sd(group_F_embed$embed_dist)
+# Make heatmap
+group_F_summary = group_F_embed %>% 
+  mutate(two_digit_1 = substr(ICD1, 1, 2),
+         two_digit_2 = substr(ICD2, 1, 2)) %>% 
+  group_by(two_digit_1, two_digit_2) %>% 
+  dplyr::summarize(mean_dist = mean(embed_dist, na.rm = T)) 
+to_plot_mean = group_F_summary %>% select(two_digit_1, two_digit_2, mean_dist) %>% 
+  spread(two_digit_2, value = mean_dist) %>% column_to_rownames("two_digit_1") %>% as.matrix()
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/F_group.pdf'), wi = 6, he = 7);
+corrplot(to_plot_mean, is.corr = FALSE, method = 'color', col.lim = c(0.33, 1), type = "lower", 
+         tl.pos = "ld", tl.col = 'grey30', tl.srt = 0,
+         col = COL1('Blues'), cl.pos = 'n', addCoef.col = 'white')
+dev.off()
+```
+
+## 3) Chapter (all clinical chapters) 
+```{r Make heatmap}
+# Distribution
+summary(embed_long_df_addChap$embed_dist)
+sd(embed_long_df_addChap$embed_dist)
+# Make heatmap
+chapter_summary = embed_long_df_addChap %>% 
+  group_by(chap_clinic1, chap_clinic2) %>% 
+  dplyr::summarise(n_pairs = n(), mean_dist = mean(embed_dist, na.rm = T)) %>% ungroup()
+# Output to table
+write.table(chapter_summary, file = paste0(raw_data_path, "Embedding.Sim/final/chapter_summary.txt"), quote = F, col.names = T, sep = "\t", row.names = F)
+
+chapter_summary_stats = chapter_summary %>% as.data.frame() %>% 
+  mutate(case_control = case_when(
+    chap_clinic1 == chap_clinic2 ~ "within chapter",
+    TRUE ~ "across chapter"
+  )) %>% select(-c(chap_clinic1, chap_clinic2))
+
+
+to_plot_mean = chapter_summary %>% select(chap_clinic1, chap_clinic2, mean_dist) %>% 
+  spread(chap_clinic2, value = mean_dist) %>% column_to_rownames("chap_clinic1") %>% as.matrix()
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/chapter-nonum2.pdf'), wi = 10, he = 12);
+corrplot(to_plot_mean, is.corr = FALSE, method = 'color', col.lim = c(0.33, 1), type = "lower", 
+         tl.pos = "l", tl.col = 'grey30', tl.srt = 0,
+         col = COL1('Blues'), cl.pos = 'r')
+dev.off()
+```
+
+```{r}
+library(gtsummary)
+study_compare = tbl_summary(
+  chapter_summary_stats,
+  by = case_control,
+) %>% add_n() %>% add_p()
+study_compare
+```
+
+```{r}
+library(ggpubr)
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/chapter-box.pdf'), wi = 2.5, he = 2.5);
+ggplot(chapter_summary_stats, aes(x = case_control, y = mean_dist, fill = case_control)) +
+  geom_boxplot(alpha = 0.5) +
+  theme(legend.position = "none") +
+  labs(x = NULL, y = "Mean distance") +
+  geom_signif(
+    comparisons = list(c("within chapter", "across chapter")),
+    map_signif_level = T)
+dev.off()
+```
+
+
+## 4) Embedding vs. Naive -- ICD within group (C60-80)
+```{r}
+# Embedding
+group_icd = grep("C[67][0-9]+", colnames(embed_sim_cal), value = TRUE)
+group_icd = c(group_icd, "C80")
+group_C1_embed = embed_long_df %>% filter(ICD1 %in% group_icd & ICD2 %in% group_icd)
+# Distribution
+summary(group_C1_embed$embed_dist)
+sd(group_C1_embed$embed_dist)
+to_plot_mean = group_C1_embed %>% select(ICD1, ICD2, embed_dist) %>% 
+  spread(ICD2, value = embed_dist) %>% column_to_rownames("ICD1") %>% as.matrix()
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/C[67]_ICD2.pdf'), wi = 10, he = 10);
+corrplot(to_plot_mean, is.corr = FALSE, method = 'color', col.lim = c(0, 1), type = "lower", 
+         tl.pos = "l", tl.col = 'black', tl.srt = 0,
+         col = COL1('Blues'), cl.pos = 'b', addCoef.col = 'black')
+dev.off()
+
+# Naive
+group_C1_embed = dist_final %>% filter(ICD1 %in% group_icd & ICD2 %in% group_icd) %>% select(ICD1, ICD2, naive_dist) 
+group_C1_embed_add = group_C1_embed %>% dplyr::rename(ICD2 = ICD1, ICD1 = ICD2)
+all_codes = unique(union(unique(group_C1_embed$ICD1), unique(group_C1_embed$ICD2)))
+group_C1_embed_add2 = cbind(all_codes, all_codes, rep(0, length(all_codes)))
+colnames(group_C1_embed_add2) = c("ICD1", "ICD2", "naive_dist")
+group_C1_embed_final = rbind(group_C1_embed, group_C1_embed_add, group_C1_embed_add2)
+# Distribution
+summary(group_C1_embed$naive_dist)
+sd(group_C1_embed$naive_dist)
+to_plot_mean = group_C1_embed_final %>% mutate(naive_dist = as.numeric(naive_dist)) %>% 
+  spread(ICD2, value = naive_dist) %>% column_to_rownames("ICD1") %>% as.matrix()
+pdf(file = paste0(output_path, 'Embedding.Sim/heatmap/C[67]_ICD_naive2.pdf'), wi = 10, he = 10);
+corrplot(to_plot_mean, is.corr = FALSE, method = 'color', col.lim = c(0, 1), type = "upper", 
+         tl.pos = "b", tl.col = 'grey50', tl.srt = 0,
+         col = COL1('Blues'), cl.pos = 'r', addCoef.col = 'grey50')
+dev.off()  
+```
+
+# Figure 4. Align clustered embeddings & ICD
+```{r load in clustering results}
+load(file = paste0(raw_data_path, "Embedding.Sim/final/cluster_result.rda"))
+```
+
+```{r Plot Jaccard}
+nChaps = length(unique(cluster_result_addChap$chapter_num))
+nMods = length(unique(cluster_result_addChap$dtcolor_embed))
+# Initialize tables of the corresponding counts
+CountTbl = matrix(0, nrow = nChaps, ncol = nMods)
+# Execute all pairwaise comparisons
+for (i in 1:nChaps) {
+  chap = sort(unique(cluster_result_addChap$chapter_num))[i]
+  for (j in 1:nMods) {
+    mod = unique(cluster_result_addChap$dtcolor_embed)[j]
+    print(paste0(chap, '-', mod))
+    chap_icd = cluster_result_addChap %>% filter(chapter_num == chap) %>% pull(ICD)
+    mod_icd = cluster_result_addChap %>% filter(dtcolor_embed == mod) %>% pull(ICD)
+    CountTbl[i, j] = length(intersect(chap_icd, mod_icd))
+  }
+}
+# Marginal counts (really module sizes)
+ChapTotals = apply(CountTbl, 1, sum)
+ModTotals = apply(CountTbl, 2, sum)
+rownames(CountTbl) = paste("Chapter ", as.roman(1:22), ": ", ChapTotals, sep = "")
+colnames(CountTbl) = paste(" ", unique(cluster_result_addChap$dtcolor_embed))
+# Reorder to make it prettier
+ModTotals = t(as.data.frame(ModTotals))[, c(3,11,1,13,16,6,9,2,19,17,5,7,15,12,21,10,4,18,20,22,8,14)] %>% as.vector()
+CountTbl_arrange = as.data.frame(CountTbl)[, c(3,11,1,13,16,6,9,2,19,17,5,7,15,12,21,10,4,18,20,22,8,14)] %>% as.matrix()
+# Calculate Jaccard index
+jaccard_raw_chap = matrix(cbind(rep(ChapTotals, times = 22)), nrow = 22, ncol = 22)
+jaccard_raw_mod = t(matrix(cbind(rep(ModTotals, times = 22)), nrow = 22, ncol = 22))
+jaccard_matrix = round(CountTbl_arrange / (jaccard_raw_chap + jaccard_raw_mod - CountTbl_arrange), 2)
+# Plot heatmap
+pdf(file = paste0(output_path, "Embedding.Sim/clustering/Chap.vs.Mod_dtc_jaccard.pdf"), wi = 15, he = 8)
+par(mfrow=c(1,1))
+par(cex = 1.0)
+par(mar=c(8, 10.4, 2.7, 1)+0.3)
+labeledHeatmap(Matrix = jaccard_matrix,
+               xLabels = colnames(jaccard_matrix),
+               yLabels = rownames(jaccard_matrix),
+               colorLabels = TRUE,
+               xSymbols = paste("Mod", colnames(jaccard_matrix), ": ", ModTotals, sep = ""),
+               textMatrix = jaccard_matrix,
+               colors = blueWhiteRed(100)[50:100],
+               main = "Real ICD chapter vs. predicted modules (Jaccard index)",
+               cex.text = 1.0, cex.lab = 1.0, setStdMargins = FALSE)
+dev.off()
+```
+
+```{r}
+library(icd.data)
+icd_short = icd10cm2016 %>% filter(nchar(code) == 3) %>% 
+  select(code, sub_chapter, short_desc) %>% unique()
+cluster_result_IX = cluster_result %>% as.data.frame() %>% filter(dtcolor_embed == "salmon") %>% 
+  left_join(icd_short, by = c("ICD" = "code"))
+  filter(substr(ICD,1,1) == "K") %>% 
+  
+```
+
+
+# Figure 5. Embedding vs. Tree (By clinical chapters + study types)
+```{r}
+load(file = paste0(raw_data_path, "compare_distance_df.rda"))
+```
+
+## 1) Embeddings vs. Genetic
+```{r}
+# Embedding vs. genetics 
+gen_embed = compare_distance_df %>% 
+  select(ICD1, ICD2, chap_clinic1, chap_clinic2, embed_dist, gen_dist, Study_type) %>% 
+  filter(ICD1 != ICD2) %>% filter(!is.na(embed_dist) & !is.na(gen_dist))
+gen_embed$chap_clinic1 = factor(gen_embed$chap_clinic1,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+gen_embed$chap_clinic2 = factor(gen_embed$chap_clinic2,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+# N = 1360 pairs
+# Overall trend
+plot_embed_gene_all = ggplot(gen_embed, aes(x = embed_dist, y = gen_dist)) + 
+  geom_point(size = 1, alpha = 0.5) + xlim(0, 1) + ylim(-1.5, 0.5) +
+  geom_spline(nknots = 30, colour = "red", size = 1) +
+  labs(colour = "Chapter", x = "Genetic distance", y = "Embedding distance")
+plot_embed_gene = ggplot(gen_embed, aes(x = embed_dist, y = gen_dist, color = chap_clinic2)) + 
+  geom_point(size = 1, alpha = 0.25) + xlim(0, 1) + ylim(-1.5, 0.5) +
+  geom_smooth(method = "lm", se = F) +
+  labs(colour = "Chapter", x = "Genetic distance", y = "Embedding distance")
+
+# Sensitivity
+plot_embed_gene_bytype = ggplot(gen_embed, aes(x = gen_cor, y = embed_dist, color = chap_clinic2, linetype = Study_type)) + 
+  geom_point(size = 1, alpha = 0, position = "jitter", na.rm = T) + xlim(0, 1) + ylim(-0.5, 1.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(colour = "Chapter", x = "Embedding distance", y = "Genetic correlation") +
+  scale_linetype_discrete(name = "Study Type", 
+                          breaks = c("SNP-based", "Family/Twin-study"), 
+                          labels = c("SNP-based", "Family/Twin-study"))
+```
+
+## 2) Embeddings vs. Comorbidity
+```{r}
+# Embedding vs. genetics 
+comorb_embed = compare_distance_df %>% 
+  select(ICD1, ICD2, chap_clinic1, chap_clinic2, embed_dist, jaccard_dist) %>% 
+  filter(ICD1 != ICD2) %>% filter(!is.na(embed_dist) & !is.na(jaccard_dist))
+comorb_embed$chap_clinic1 = factor(comorb_embed$chap_clinic1,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+comorb_embed$chap_clinic2 = factor(comorb_embed$chap_clinic2,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+# N = 2,212,766 pairs
+# Overall trend
+plot_embed_comorb_all = ggplot(comorb_embed, aes(x = embed_dist, y = jaccard_dist)) + 
+  geom_point(size = 0.1, alpha = 0.5) + xlim(0, 1) + ylim(0, 1) +
+  geom_spline(nknots = 30, colour = "red", size = 1) +
+  labs(colour = "Chapter", x = "Embedding distance", y = "Comorbidity distance")
+plot_embed_comorb = ggplot(comorb_embed, aes(x = embed_dist, y = jaccard_dist, color = chap_clinic2)) + 
+  geom_point(size = 0.1, alpha = 0.25) + xlim(0, 1) + ylim(0, 1) +
+  geom_smooth(method = "lm", se = F) +
+  labs(colour = "Chapter", x = "Embedding distance", y = "Comorbidity distance") 
+```
+
+```{r}
+# Output to pdf
+g1 = ggplotGrob(plot_embed_gene_all)
+g2 = ggplotGrob(plot_embed_gene)
+g3 = ggplotGrob(plot_embed_comorb_all)
+g4 = ggplotGrob(plot_embed_comorb)
+
+g_set1 = rbind(g1, g3, size = "first")
+g_set1$widths = unit.pmax(g1$widths, g3$widths)
+g_set2 = ggarrange(plot_embed_gene, plot_embed_comorb, 
+                   common.legend = T, nrow = 2, legend = "right")
+g_set2$widths = unit.pmax(g2$widths, g4$widths)
+
+pdf(file = paste0(output_path, "Dist.Eval/EmbedvsAll_cor.pdf"), wi = 8, he = 9.5);
+grid.arrange(
+  g_set1, g_set2, 
+  widths = c(1.7, 2)
+)
+dev.off()
+```
+
+```{r}
+interest_comorb = compare_distance_df %>% 
+  filter(embed_dist < 0.05 & jaccard_dist == 1)
+```
+
+## 2) ICD Tree
+```{r}
+# Tree vs. genetics 
+gen_tree = compare_distance_df %>% 
+  select(ICD1, ICD2, chap_clinic1, chap_clinic2, naive_dist, gen_dist, Study_type) %>% 
+  filter(ICD1 != ICD2) %>% filter(!is.na(naive_dist) & !is.na(gen_dist))
+# N = 1806 pairs
+gen_tree$chap_clinic1 = factor(gen_tree$chap_clinic1,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+gen_tree$chap_clinic2 = factor(gen_tree$chap_clinic2,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+# Overall trend
+plot_tree_gene_all = ggplot(gen_tree, aes(x = naive_dist, y = gen_dist)) + 
+  geom_point(size = 1, alpha = 0.5) + xlim(0, 1) + ylim(-1.5, 0.5) +
+  geom_smooth(method = "lm", se = T, colour = "red") +
+  labs(colour = "Chapter", x = "ICD tree distance", y = "Genetic distance")
+plot_tree_gene = ggplot(gen_tree, aes(x = naive_dist, y = gen_dist, color = chap_clinic2)) + 
+  geom_point(size = 1, alpha = 0.25, position = "jitter", na.rm = T) + xlim(0, 1) + ylim(-1.5, 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(colour = "Chapter", x = "ICD tree distance", y = "Genetic distance") +
+  theme(legend.position = "none")
+
+# Sensitivity
+plot_tree_gene_bytype = ggplot(gen_tree, aes(x = naive_dist, y = gen_dist, color = chap_clinic2, linetype = Study_type)) + 
+  geom_point(size = 1, alpha = 0, position = "jitter", na.rm = T) + xlim(0, 1) + ylim(-0.5, 1.5) +
+  geom_smooth(method = "lm", se = FALSE, na.rm = T) +
+  labs(colour = "Chapter", x = "ICD tree distance", y = "Genetic distance") +
+  scale_linetype_discrete(name = "Study Type", 
+                          breaks = c("SNP-based", "Family/Twin-study"), 
+                          labels = c("SNP-based", "Family/Twin-study"))
+```
+
+```{r}
+# Embedding vs. genetics 
+comorb_tree = compare_distance_df %>% 
+  select(ICD1, ICD2, chap_clinic1, chap_clinic2, naive_dist, jaccard_dist) %>% 
+  filter(ICD1 != ICD2) %>% filter(!is.na(naive_dist) & !is.na(jaccard_dist))
+comorb_tree$chap_clinic1 = factor(comorb_tree$chap_clinic1,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+comorb_tree$chap_clinic2 = factor(comorb_tree$chap_clinic2,
+              levels = c("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+              "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX",
+              "XXI", "XXII"))
+# N = 2,212,766 pairs
+# Overall trend
+plot_tree_comorb_all = ggplot(comorb_tree, aes(x = naive_dist, y = jaccard_dist)) + 
+  geom_point(size = 0.1, alpha = 0.5) + xlim(0, 1) + ylim(0, 1) +
+  geom_smooth(method = "lm", se = T, colour = "red") +
+  labs(colour = "Chapter", x = "ICD tree distance", y = "Comorbidity distance")
+plot_tree_comorb = ggplot(comorb_tree, aes(x = naive_dist, y = jaccard_dist, color = chap_clinic2)) + 
+  geom_point(size = 0.1, alpha = 0.25) + xlim(0, 1) + ylim(0, 1) +
+  geom_smooth(method = "lm", se = F) +
+  labs(colour = "Chapter", x = "ICD tree distance", y = "Comorbidity distance") 
+```
+
+```{r}
+# Output to pdf
+g1 = ggplotGrob(plot_tree_gene_all)
+g2 = ggplotGrob(plot_tree_gene)
+g3 = ggplotGrob(plot_tree_comorb_all)
+g4 = ggplotGrob(plot_tree_comorb)
+
+g_set1 = rbind(g1, g3, size = "first")
+g_set1$widths = unit.pmax(g1$widths, g3$widths)
+g_set2 = ggarrange(plot_tree_gene, plot_tree_comorb, 
+                   common.legend = T, nrow = 2, legend = "right")
+g_set2$widths = unit.pmax(g2$widths, g4$widths)
+
+pdf(file = paste0(output_path, "Dist.Eval/TreevsAll_cor.pdf"), wi = 8, he = 9.5);
+grid.arrange(
+  g_set1, g_set2, 
+  widths = c(1.7, 2)
+)
+dev.off()
+```
+
+
+```{r Output to pdf}
+# Output to pdf
+g1 = ggplotGrob(plot_embed_gene_all)
+g2 = ggplotGrob(plot_embed_gene)
+g3 = ggplotGrob(plot_embed_gene_bytype)
+g4 = ggplotGrob(plot_tree_gene_all)
+g5 = ggplotGrob(plot_tree_gene)
+g6 = ggplotGrob(plot_tree_gene_bytype)
+
+g_set1 = rbind(g1, g4, size = "first")
+g_set1$widths = unit.pmax(g1$widths, g4$widths)
+g_set2 = ggarrange(plot_embed_gene, plot_embed_gene_bytype, 
+                   common.legend = T, nrow = 1, legend = "right")
+g_set2$widths = unit.pmax(g2$widths, g5$widths)
+g_set3 = ggarrange(plot_tree_gene, plot_tree_gene_bytype, 
+                   common.legend = T, nrow = 1, legend = "right")
+g_set3$widths = unit.pmax(g3$widths, g6$widths)
+
+pdf(file = paste0(output_path, "Genetic.Cor/Embed.vs.Tree/EmbedvsTree_cor.pdf"), wi = 10, he = 9.5);
+grid.arrange(
+  g_set1, g_set2, g_set3,
+  widths = c(1.7, 1.5, 2.3),
+  layout_matrix = rbind(c(1, 2, 2),
+                        c(1, 3, 3))
+)
+dev.off()
+```
+
+
+# Figure 6. Embed/Gen/Comorb Pairwise Correlations 
+## 1) Overall correlation
+```{r}
+dist_short_cor = compare_distance_df %>% select(naive_dist, embed_dist, jaccard_dist, gen_dist)
+corr_mat = as.matrix(round(cor(dist_short_cor, use = "na.or.complete"), 2))
+corr_mat = cor(dist_short_cor, use = "na.or.complete", method = "spearman")
+testRes = cor.mtest(dist_short_cor, conf.level = 0.95, 
+                    use = "na.or.complete", method = "spearman")
+rownames(corr_mat) = c("ICD Tree", "Embedding", "Comorbidity", "Genetic")
+colnames(corr_mat) = c("ICD Tree", "Embedding", "Comorbidity", "Genetic")
+
+pdf(file = paste0(output_path, "Dist.Eval/Corr_all_Spearman_0511.pdf"), wi = 5, he = 3);
+corrplot(corr_mat, p.mat = testRes$p, sig.level = 0.05, order = 'hclust', 
+         method = 'color', col.lim = c(-1, 1), type = "lower", 
+         tl.pos = "ld", tl.col = 'grey50', tl.srt = 0,
+         col = COL2('RdYlBu'), cl.pos = 'r', diag = F, insig = 'blank',
+         addCoef.col = 'black', number.cex = 1, addrect = 2)
+dev.off()
+```
+
+## 2) Embedding vs. others
+```{r}
+coef_table = array(NA, dim = c(22, 6))
+for (i in 1:length(unique(compare_distance_df$chap_clinic1))) {
+  chapter = as.character(as.roman(i))
+  data_subset = compare_distance_df %>% filter((chap_clinic1 == chapter) & !is.na(embed_dist))
+  if (sum(!is.na(data_subset$gen_dist)) > 0) {
+    if (length(unique(data_subset$Study_type[!is.na(data_subset$Study_type)])) > 1) {
+      model = lm(gen_dist ~ embed_dist, data = data_subset)
+      confinterval = confint(model, level = 0.95)
+      lower_CI = confinterval[2]
+      upper_CI = confinterval[4]
+    } else {
+      model = lm(gen_dist ~ embed_dist, data = data_subset)
+      confinterval = confint(model, level = 0.95)
+      lower_CI = confinterval[2]
+      upper_CI = confinterval[4]
+    }
+    summary_results = summary(model)
+    coeff = summary_results$coefficients[2]
+    CI_95 = paste0(sprintf('%.2f', coeff), ' (', sprintf('%.2f',lower_CI), ', ', sprintf('%.2f',upper_CI), ')')
+    coef_table[i,1] = chapter
+    coef_table[i,2] = length(summary_results$residuals)
+    coef_table[i,3] = coeff
+    coef_table[i,4] = lower_CI
+    coef_table[i,5] = upper_CI
+    coef_table[i,6] = CI_95
+  } else {
+    coef_table[i,1] = chapter
+    coef_table[i,2] = NA
+    coef_table[i,3] = NA
+    coef_table[i,4] = NA
+    coef_table[i,5] = NA
+    coef_table[i,6] = NA
+  }
+  i = i + 1
+}
+  
+coef_table_final = as.data.frame(coef_table)
+colnames(coef_table_final) = c('chapter', 'N', 'beta', 'lower_CI', 'upper_CI', 'text')
+
+forest.data = coef_table_final %>% 
+  select(beta, lower_CI, upper_CI) %>% 
+  mutate(beta = round(as.numeric(as.character(beta)), 3),
+         lower_CI = round(as.numeric(as.character(lower_CI)), 2),
+         upper_CI = round(as.numeric(as.character(upper_CI)), 2)) 
+
+coef_table_final = coef_table_final %>% 
+  mutate(text = case_when(
+    !is.na(text) ~ text,
+    TRUE ~ "NA"
+  )) %>% 
+  mutate(N = case_when(
+    !is.na(N) ~ as.character(N),
+    TRUE ~ "NA"
+  ))
+
+tabletext = cbind(
+  c("Chapter", coef_table_final$chapter),
+  c("N pairs", coef_table_final$N),
+  c("Beta coefficient (95% CI)", as.character(coef_table_final$text))
+)
+colors = hue_pal()(22)
+styles <- fpShapesGp(
+  lines = list(
+    gpar(col = "black"),
+    gpar(col = colors[1]),
+    gpar(col = colors[2]),
+    gpar(col = colors[3]),
+    gpar(col = colors[4]),
+    gpar(col = colors[5]),
+    gpar(col = colors[6]),
+    gpar(col = colors[7]),
+    gpar(col = colors[8]),
+    gpar(col = colors[9]),
+    gpar(col = colors[10]),
+    gpar(col = colors[11]),
+    gpar(col = colors[12]),
+    gpar(col = colors[13]),
+    gpar(col = colors[14]),
+    gpar(col = colors[15]),
+    gpar(col = colors[16]),
+    gpar(col = colors[17]),
+    gpar(col = colors[18]),
+    gpar(col = colors[19]),
+    gpar(col = colors[20]),
+    gpar(col = colors[21]),
+    gpar(col = colors[22])
+    ),
+  box = list(
+    gpar(fill = "black"),
+    gpar(fill = colors[1], col = colors[1]),
+    gpar(fill = colors[2], col = colors[2]),
+    gpar(fill = colors[3], col = colors[3]),
+    gpar(fill = colors[4], col = colors[4]),
+    gpar(fill = colors[5], col = colors[5]),
+    gpar(fill = colors[6], col = colors[6]),
+    gpar(fill = colors[7], col = colors[7]),
+    gpar(fill = colors[8], col = colors[8]),
+    gpar(fill = colors[9], col = colors[9]),
+    gpar(fill = colors[10], col = colors[10]),
+    gpar(fill = colors[11], col = colors[11]),
+    gpar(fill = colors[12], col = colors[12]),
+    gpar(fill = colors[13], col = colors[13]),
+    gpar(fill = colors[14], col = colors[14]),
+    gpar(fill = colors[15], col = colors[15]),
+    gpar(fill = colors[16], col = colors[16]),
+    gpar(fill = colors[17], col = colors[17]),
+    gpar(fill = colors[18], col = colors[18]),
+    gpar(fill = colors[19], col = colors[19]),
+    gpar(fill = colors[20], col = colors[20]),
+    gpar(fill = colors[21], col = colors[21]),
+    gpar(fill = colors[22], col = colors[22])
+    )
+  ) 
+
+pdf(file = paste0(output_path, "Dist.Eval/Embed_gene_forest.pdf"),width = 8, height = 5)
+forestplot(labeltext = tabletext, graph.pos = 1, is.summary = c(TRUE, rep(FALSE, 22)),
+           mean = c(NA, forest.data$beta), 
+           lower = c(NA, forest.data$lower_CI),
+           upper = c(NA, forest.data$upper_CI),
+           xticks = c(-1.5, -1, -0.5, 0, 0.5, 1, 1.5),
+           zero = 0, align = c("c", "c", "c"),
+           title = "Figure 5. Associations between embedding and genetic distances by clinical chapter",
+           xlab = "Effect Size of association with genetic distance",
+           txt_gp = fpTxtGp(label = list(gpar(fontface = "bold", cex = 0.8),
+                                     gpar(cex = 0.8),
+                                     gpar(cex = 0.8)),
+                          ticks = gpar(cex = 0.6),
+                          xlab = gpar(cex = 0.8),
+                          title = gpar(cex = 1)),
+           shapes_gp = styles, cex = 0.2, lineheight = "auto", boxsize = 0.3, 
+           hrzl_lines = list("2" = gpar(lty = 2)), 
+           lwd.ci = 1, ci.vertices = TRUE, ci.vertices.height = 0.15)
+dev.off()
+```
+
+## Comorbidity
+```{r}
+coef_table = array(NA, dim = c(22, 6))
+ci_cor(data_subset, method = "spearman", type = "bootstrap", R = nrow(data_subset)+1)
+for (i in 1:length(unique(compare_distance_df$chap_clinic1))) {
+  chapter = as.character(as.roman(i))
+  data_subset = compare_distance_df %>% filter((chap_clinic1 == chapter) & !is.na(embed_dist)) %>% 
+    select(embed_dist, jaccard_dist)
+  if (sum(!is.na(data_subset$jaccard_dist)) > 0) {
+      model = lm(jaccard_dist ~ embed_dist, data = data_subset)
+      confinterval = confint(model, level = 0.95)
+      lower_CI = confinterval[2]
+      upper_CI = confinterval[4]
+      summary_results = summary(model)
+      coeff = summary_results$coefficients[2]
+      CI_95 = paste0(sprintf('%.2f', coeff), ' (', sprintf('%.2f',lower_CI), ', ', sprintf('%.2f',upper_CI), ')')
+      coef_table[i,1] = chapter
+      coef_table[i,2] = length(summary_results$residuals)
+      coef_table[i,3] = coeff
+      coef_table[i,4] = lower_CI
+      coef_table[i,5] = upper_CI
+      coef_table[i,6] = CI_95
+    } else {
+    coef_table[i,1] = chapter
+    coef_table[i,2] = NA
+    coef_table[i,3] = NA
+    coef_table[i,4] = NA
+    coef_table[i,5] = NA
+    coef_table[i,6] = NA
+  }
+  i = i + 1
+}
+  
+coef_table_final = as.data.frame(coef_table)
+colnames(coef_table_final) = c('chapter', 'N', 'beta', 'lower_CI', 'upper_CI', 'text')
+
+forest.data = coef_table_final %>% 
+  select(beta, lower_CI, upper_CI) %>% 
+  mutate(beta = round(as.numeric(as.character(beta)), 3),
+         lower_CI = round(as.numeric(as.character(lower_CI)), 2),
+         upper_CI = round(as.numeric(as.character(upper_CI)), 2)) 
+
+coef_table_final = coef_table_final %>% 
+  mutate(text = case_when(
+    !is.na(text) ~ text,
+    TRUE ~ "NA"
+  )) %>% 
+  mutate(N = case_when(
+    !is.na(N) ~ as.character(N),
+    TRUE ~ "NA"
+  ))
+
+tabletext = cbind(
+  c("Chapter", coef_table_final$chapter),
+  c("N pairs", coef_table_final$N),
+  c("Beta coefficient (95% CI)", as.character(coef_table_final$text))
+)
+
+colors = hue_pal()(22)
+styles <- fpShapesGp(
+  lines = list(
+    gpar(col = "black"),
+    gpar(col = colors[1]),
+    gpar(col = colors[2]),
+    gpar(col = colors[3]),
+    gpar(col = colors[4]),
+    gpar(col = colors[5]),
+    gpar(col = colors[6]),
+    gpar(col = colors[7]),
+    gpar(col = colors[8]),
+    gpar(col = colors[9]),
+    gpar(col = colors[10]),
+    gpar(col = colors[11]),
+    gpar(col = colors[12]),
+    gpar(col = colors[13]),
+    gpar(col = colors[14]),
+    gpar(col = colors[15]),
+    gpar(col = colors[16]),
+    gpar(col = colors[17]),
+    gpar(col = colors[18]),
+    gpar(col = colors[19]),
+    gpar(col = colors[20]),
+    gpar(col = colors[21]),
+    gpar(col = colors[22])
+    ),
+  box = list(
+    gpar(fill = "black"),
+    gpar(fill = colors[1], col = colors[1]),
+    gpar(fill = colors[2], col = colors[2]),
+    gpar(fill = colors[3], col = colors[3]),
+    gpar(fill = colors[4], col = colors[4]),
+    gpar(fill = colors[5], col = colors[5]),
+    gpar(fill = colors[6], col = colors[6]),
+    gpar(fill = colors[7], col = colors[7]),
+    gpar(fill = colors[8], col = colors[8]),
+    gpar(fill = colors[9], col = colors[9]),
+    gpar(fill = colors[10], col = colors[10]),
+    gpar(fill = colors[11], col = colors[11]),
+    gpar(fill = colors[12], col = colors[12]),
+    gpar(fill = colors[13], col = colors[13]),
+    gpar(fill = colors[14], col = colors[14]),
+    gpar(fill = colors[15], col = colors[15]),
+    gpar(fill = colors[16], col = colors[16]),
+    gpar(fill = colors[17], col = colors[17]),
+    gpar(fill = colors[18], col = colors[18]),
+    gpar(fill = colors[19], col = colors[19]),
+    gpar(fill = colors[20], col = colors[20]),
+    gpar(fill = colors[21], col = colors[21]),
+    gpar(fill = colors[22], col = colors[22])
+    )
+  ) 
+
+pdf(file = paste0(output_path, "Dist.Eval/Embed_comorb_forest.pdf"),width = 10, height = 5)
+forestplot(labeltext = tabletext, graph.pos = 1, is.summary = c(TRUE, rep(FALSE, 22)),
+           mean = c(NA, forest.data$beta), 
+           lower = c(NA, forest.data$lower_CI),
+           upper = c(NA, forest.data$upper_CI),
+           xticks = c(0, 0.01, 0.02, 0.03, 0.04, 0.05),
+           zero = 0, align = c("c", "c", "c"),
+           title = "Figure 5. Associations between embedding and comorbidity distances by clinical chapter",
+           xlab = "Effect Size of association with embedding distance",
+           txt_gp = fpTxtGp(label = list(gpar(fontface = "bold", cex = 0.8),
+                                     gpar(cex = 0.8),
+                                     gpar(cex = 0.8)),
+                          ticks = gpar(cex = 0.6),
+                          xlab = gpar(cex = 0.8),
+                          title = gpar(cex = 1)),
+           shapes_gp = styles, cex = 0.2, lineheight = "auto", boxsize = 0.3, 
+           hrzl_lines = list("2" = gpar(lty = 2)), 
+           lwd.ci = 1, ci.vertices = TRUE, ci.vertices.height = 0.15)
+dev.off()
+```
+
+```{r}
+load(file = paste0(raw_data_path, "Embedding.Sim/final/cor_Embedresult_byChap.rda"))
+```
+
+```{r Make plots}
+cor_result_plot_2 = cor_Embedresult_byChap %>% 
+  mutate(Chap = paste0("Chap ", Chapter)) %>% 
+  select(Chap, cor_gene, cor_comorb) %>% 
+  column_to_rownames(var = "Chap") %>% as.matrix()
+colnames(cor_result_plot_2) = c("Genetic", "Comorbidity")
+col_fun = colorRamp2(c(-1, 0, 1), c("#4d908e", "white", "#e63946"))
+row_ha_gene = rowAnnotation(Count = anno_barplot(cor_Embedresult_byChap$complete_genetic, 
+                                                  gp = gpar(fill = "#ffba08", lwd = 0),
+                                                  ylim = c(0,400), axis_param = list(direction = "reverse"),
+                                                  add_numbers = TRUE),
+                             width = unit(2, "cm"))
+row_ha_comorb = rowAnnotation(Count = anno_barplot(cor_Embedresult_byChap$complete_comorb, 
+                                                   gp = gpar(fill = "#0077b6", lwd = 0), 
+                                                   add_numbers = T),
+                              width = unit(2, "cm"))
+
+pdf(file = paste0(output_path, "Dist.Eval/Embed_comorb+gene.pdf"), wi = 6, he = 6);
+Heatmap(cor_result_plot_2, right_annotation = row_ha_comorb, left_annotation = row_ha_gene,
+        cluster_rows = F, cluster_columns = F,
+        column_title = "Associations by clinical chapters", 
+        column_title_gp = gpar(fontsize = 11), 
+        column_names_rot = 0, column_names_centered = TRUE, name = "Correlation", col = col_fun,
+        cell_fun = function(j, i, x, y, width, height, fill) {
+            grid.text(sprintf("%.3f", cor_result_plot_2[i, j]), x, y, gp = gpar(fontsize = 11))
+        })
+dev.off()
+```
+
+
