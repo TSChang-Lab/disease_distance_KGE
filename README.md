@@ -1,4 +1,5 @@
-# Defining the distance between diseases using knowledge-graph embedding
+# Defining the distance between diseases using SNOMED CT embeddings
+### Mingzhou Fu, Yu Yan, Loes M Olde Loohuis, and Timothy S Chang
 
 ## Data description
 ### Disease distance files
@@ -30,10 +31,13 @@ The mapping from SNOMED-CT concepts to ICD-10 codes.
 
 Reference: Odysseus Data Services, Inc, ATHENA – OHDSI VOCABULARIES REPOSITORY, (2022). https://athena.ohdsi.org/search-terms/terms (accessed March 4, 2022)
 
-
 3. **/Genetic_Dist/raw/mine_corr.xlsx** and **/Genetic_Dist/raw/mine_h2.xlsx**
 
 Mined genetic correlation and heritability results from literatures.
 
 Reference: G. Jia, Y. Li, H. Zhang, I. Chattopadhyay, A. Boeck Jensen, D.R. Blair, L. Davis, P.N. Robinson, T. Dahlén, S. Brunak, M. Benson, G. Edgren, N.J. Cox, X. Gao, A. Rzhetsky, Estimating heritability and genetic correlations from large health datasets in the absence of genetic data, Nat Commun. 10 (2019) 5508. https://doi.org/10.1038/s41467-019-13455-0
+
+
+## Citation information
+M. Fu, Y. Yan, L.M. Olde Loohuis, T.S. Chang, Defining the distance between diseases using SNOMED CT embeddings, Journal of Biomedical Informatics. 139 (2023) 104307. https://doi.org/10.1016/j.jbi.2023.104307.
 
